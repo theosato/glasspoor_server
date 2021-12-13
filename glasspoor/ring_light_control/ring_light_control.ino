@@ -7,8 +7,8 @@
 #include <Adafruit_NeoPixel.h>
 
 // Network credentials
-const char* ssid = "...";
-const char* password = "tibico123";
+const char* ssid = "Sato 2g";
+const char* password = "81527765";
 
 #define PIN 26
 
