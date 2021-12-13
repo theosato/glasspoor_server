@@ -1,65 +1,137 @@
+#include "Arduino.h"
 #include <WiFi.h>
+#include <Preferences.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
+#include <ArduinoJson.h>
 #include <Adafruit_NeoPixel.h>
-#include <ESPAsyncWebServer.h>
-#define PIN 26
 
-const char* ssid     = "...";
+// Network credentials
+const char* ssid = "...";
 const char* password = "tibico123";
+
+#define PIN 26
 
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(60, PIN, NEO_GRB + NEO_KHZ800);
 
+WebServer server(80);
 
-AsyncWebServer server(80);
+Preferences preferences;
 
-void setup()
-{
-    Serial.begin(115200);
+void getConfigurations() {
+    DynamicJsonDocument doc(512);
+    
+    DynamicJsonDocument color(512);
+    color["red"] = preferences.getUInt("red", 0);
+    color["green"] = preferences.getUInt("green", 0);
+    color["blue"] = preferences.getUInt("blue", 0);
+    doc["color"] = color;
 
-    // We start by connecting to a WiFi network
+    DynamicJsonDocument location(512);
+    location["country"] = preferences.getString("country", "");
+    location["state"] = preferences.getString("state", "");
+    location["city"] = preferences.getString("city", "");
+    doc["location"] = location;
+    
+    String buf;
+    serializeJson(doc, buf);
+    server.send(200, "application/json", buf);
+}
 
-    Serial.println();
-    Serial.println();
-    Serial.print("Connecting to ");
-    Serial.println(ssid);
+void setConfigurations() {
+    String postBody = server.arg("plain"); 
+    Serial.println(postBody);
+    DynamicJsonDocument doc(512);
+    DeserializationError error = deserializeJson(doc, postBody);
+    if (error) {
+        server.send(400, F("text/html"), "Error in parsin json body!");
+    } else {
+        JsonObject postObj = doc.as<JsonObject>();
+        if (postObj.containsKey("color") && postObj.containsKey("location")) {
+            if (postObj["color"].containsKey("red") && postObj["color"].containsKey("green") && postObj["color"].containsKey("blue")){
+                for (int num = 0; num < 60; num ++){
+                  pixels.setPixelColor(num, pixels.Color(postObj["color"]["red"], postObj["color"]["green"], postObj["color"]["blue"]));
+                }
+                pixels.show();
+               preferences.putUInt("red", postObj["color"]["red"]);
+               preferences.putUInt("green", postObj["color"]["green"]);
+               preferences.putUInt("blue", postObj["color"]["blue"]);
+            }
 
-    WiFi.begin(ssid, password);
+            if (postObj["location"].containsKey("country") && postObj["location"].containsKey("state") && postObj["location"].containsKey("city")){
+                const char* country = postObj["location"]["country"];
+                preferences.putString("country", country);
+                const char* state = postObj["location"]["state"];
+                preferences.putString("state", state);
+                const char* city = postObj["location"]["city"];
+                preferences.putString("city", city);
+            }
 
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print("#");
-    }
-
-    Serial.println("");
-    Serial.println("WiFi connected.");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
-    pixels.setBrightness(1);
-    pixels.begin();
-    server.on("/changeColor", HTTP_GET, [](AsyncWebServerRequest *request){
-      int paramsNr = request->params();
-      int red, green, blue;
-      red = 0;
-      green = 0;
-      blue = 0;
-      for(int i=0;i<paramsNr;i++){
-        AsyncWebParameter* p = request->getParam(i);
-        if (p->name() == "red"){
-          red = atoi(p->value().c_str());
-        }else if(p->name() == "green"){
-          green = atoi(p->value().c_str());
-        }else if(p->name() == "blue"){
-          blue = atoi(p->value().c_str());
+            DynamicJsonDocument doc(512);
+            doc["status"] = "OK";
+            String buf;
+            serializeJson(doc, buf);
+            server.send(201, F("application/json"), buf);
+        } else {
+            DynamicJsonDocument doc(512);
+            doc["status"] = "KO";
+            doc["message"] = F("Data not found or incorrect");
+            String buf;
+            serializeJson(doc, buf);
+            server.send(400, F("application/json"), buf);
         }
-      }
-
-      for (int num = 0; num < 60; num ++){
-        pixels.setPixelColor(num, pixels.Color(red, green, blue));
-      }
-      pixels.show();
-      request->send(200, "text/plain", "message received");
+    }
+}
+ 
+// Define routing
+void restServerRouting() {
+    server.on("/", HTTP_GET, []() {
+        server.send(200, F("text/html"),
+            F("Welcome to the REST Web Server"));
     });
-    server.begin();
+    server.on(F("/config"), HTTP_GET, getConfigurations);
+    server.on(F("/config"), HTTP_POST, setConfigurations);
+}
+ 
+// Manage not found URL
+void handleNotFound() {
+    DynamicJsonDocument doc(512);
+    doc["message"] = "Not found";
+    String buf;
+    serializeJson(doc, buf);
+    server.send(404, "application/json", buf);
+}
+
+void setup() {
+  Serial.begin(115200);
+  preferences.begin("config", false);
+
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected.");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  // permite chamar o server em glasspoor.com
+  if (MDNS.begin("glasspoor")) {
+    Serial.println("MDNS started");
+  }
+
+  restServerRouting();
+  server.onNotFound(handleNotFound);
+  pixels.setBrightness(1);
+  pixels.begin();
+  server.begin();
+  Serial.println("HTTP server started");
 }
 
 void loop(){
+  server.handleClient();
 }
