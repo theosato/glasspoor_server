@@ -69,6 +69,9 @@ char displayHumidity[9];
 unsigned long lastTime = 0;
 unsigned long timerDelay = 10000;
 
+// display
+uint8_t  display = 0;  // current display mode
+
 /**********  Functions  ******************************/
 // Função para retornar o horário
 void getTime(char *psz, bool f = true)
@@ -129,18 +132,8 @@ void getForecast()
             deserializeJson(forecast, jsonBuffer);
             int temp = forecast["main"]["temp"];
             int humidity = forecast["main"]["humidity"];
-            int max_temp = forecast["main"]["max_temp"];
-            int min_temp = forecast["main"]["min_temp"];
-//            JSONVar myObject = JSON.parse(jsonBuffer);
-//            Serial.print("JSON object = ");
-//            Serial.println(myObject);
-//            JSONVar main = myObject["main"];
-//            JSONVar temp = main["temp"];
-//            JSONVar humidity = main["humidity"];
-//            JSONVar max_temp = main["temp_max"];
-//            JSONVar min_temp = main["temp_min"];
-//            // transforma as leituras do Json em int, depois String e depois Char, adiciona C em temperatura
-//            // adicionar % em humidade não funcionou atm, tem que alterar o Font_data prob
+            int max_temp = forecast["main"]["temp_max"];
+            int min_temp = forecast["main"]["temp_min"];
             readings[0] = int(temp);
             readings[1] = int(humidity);
             readings[2] = int(max_temp);
@@ -244,6 +237,33 @@ void setConfigurations() {
     }
 }
 
+
+void setVoiceCommand() {
+    String postBody = server.arg("plain"); 
+    Serial.println(postBody);
+    DynamicJsonDocument doc(512);
+    DeserializationError error = deserializeJson(doc, postBody);
+    if (error) {
+        server.send(400, F("text/html"), "Error in parsin json body!");
+    } else {
+        JsonObject postObj = doc.as<JsonObject>();
+        if (postObj.containsKey("voice")) {
+            display = postObj["voice"];
+            DynamicJsonDocument doc(512);
+            doc["status"] = "OK";
+            String buf;
+            serializeJson(doc, buf);
+            server.send(201, F("application/json"), buf);
+        } else {
+            DynamicJsonDocument doc(512);
+            doc["status"] = "KO";
+            doc["message"] = F("Data not found or incorrect");
+            String buf;
+            serializeJson(doc, buf);
+            server.send(400, F("application/json"), buf);
+        }
+    }
+}
  
 // Define routing
 void restServerRouting() {
@@ -253,6 +273,7 @@ void restServerRouting() {
     });
     server.on(F("/config"), HTTP_GET, getConfigurations);
     server.on(F("/config"), HTTP_POST, setConfigurations);
+    server.on(F("/voice"), HTTP_POST, setVoiceCommand);
 }
  
 // Manage not found URL
@@ -323,7 +344,8 @@ void setup(void)
 
 void loop(void)
 {
-  static uint8_t  display = 0;  // current display mode
+  server.handleClient();
+
   static bool flasher = false;  // seconds passing flasher
   String tmp = "MAX: ";
   String tmp2 = "MIN: ";
@@ -345,7 +367,6 @@ void loop(void)
         getTime(displayAll, flasher);
         flasher = !flasher;
         P.setTextEffect(0, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
-        display++;      
         
         break;
 
@@ -353,7 +374,6 @@ void loop(void)
         tmp4 += atemp;
         tmp4.toCharArray(displayAll, 16);
         P.setTextEffect(0, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
-        display++;
         
         break;
         
@@ -362,7 +382,6 @@ void loop(void)
         tmp += maxtemp;
         tmp.toCharArray(displayAll, 16);
         P.setTextEffect(0, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
-        display++;
         
         break;     
 
@@ -371,7 +390,6 @@ void loop(void)
         tmp2 += mintemp;
         tmp2.toCharArray(displayAll, 16);
         P.setTextEffect(0, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
-        display++;
         
         break;
 
@@ -381,7 +399,6 @@ void loop(void)
         tmp5 += tmp3;
         tmp5.toCharArray(displayAll, 16);
         P.setTextEffect(0, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
-        display++;
         
         break;
 
@@ -393,6 +410,4 @@ void loop(void)
 
     P.displayReset(0); 
   }
-  server.handleClient();
-
 }
